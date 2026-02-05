@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev":"npx nodemon src/app.ts"
+    "dev": "npx nodemon src/app.ts"
   },
   "keywords": [],
   "author": "",
@@ -17,7 +17,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "pg": "^8.18.0",
-    "uuid": "^13.0.0"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@prisma/client": "^5.22.0",
@@ -25,7 +25,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.0",
     "@types/pg": "^8.16.0",
-    "@types/uuid": "^10.0.0",
+    "@types/uuid": "^9.0.8",
     "nodemon": "^3.1.11",
     "prisma": "^5.22.0",
     "ts-node": "^10.9.2",
