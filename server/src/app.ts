@@ -2,7 +2,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { initDB } from './models/schema';
 import chatRoutes from './routes/chatRoutes';
 
 dotenv.config();
@@ -31,7 +30,7 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 
 // Start Server
 const startServer = async () => {
-  await initDB(); // Run DB setup on start
+
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

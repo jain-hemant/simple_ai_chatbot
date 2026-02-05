@@ -1,88 +1,100 @@
+// src/controllers/chatController.ts
 import { Request, Response } from 'express';
-import { query } from '../config/db';
+import { prisma } from '../config/db';
 import { generateReply } from '../services/llmService';
 import { v4 as uuidv4 } from 'uuid';
 
 export const handleChatMessage = async (req: Request, res: Response): Promise<void> => {
-    let { message, sessionId } = req.body;
+  let { message, sessionId } = req.body;
 
-    if (!message) {
-        res.status(400).json({ error: 'Message is required' });
-        return;
-    }
-    // Truncate messages longer than 500 characters
-    if (message.length > 500) {
-        message = message.substring(0, 500) + "... (truncated)";
-    }
+  if (!message || typeof message !== 'string') {
+    res.status(400).json({ error: 'Message is required' });
+    return;
+  }
 
-    // Use provided sessionId (if user refreshes) or create a new one
-    const activeSessionId = sessionId || uuidv4();
+  // Idiot-Proofing: Truncate long messages
+  if (message.length > 500) message = message.substring(0, 500) + "...";
 
-    try {
-        // 1. Ensure conversation exists in DB
-        // "ON CONFLICT DO NOTHING" ensures we don't crash if the session already exists
-        await query(
-            `INSERT INTO conversations (session_id) VALUES ($1) ON CONFLICT (session_id) DO NOTHING`,
-            [activeSessionId]
-        );
+  const activeSessionId = sessionId || uuidv4();
 
-        // Get the internal UUID for this session
-        const convoResult = await query(
-            `SELECT id FROM conversations WHERE session_id = $1`,
-            [activeSessionId]
-        );
-        const conversationId = convoResult.rows[0]?.id;
+  try {
+    // 1. Find or Create Conversation
+    const conversation = await prisma.conversation.upsert({
+      where: { sessionId: activeSessionId },
+      update: {},
+      create: { sessionId: activeSessionId },
+    });
 
-        // 2. Save USER Message to DB
-        await query(
-            `INSERT INTO messages (conversation_id, sender, content) VALUES ($1, 'user', $2)`,
-            [conversationId, message]
-        );
+    // 2. Save User Message
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        sender: 'user',
+        content: message,
+      },
+    });
 
-        // 3. Fetch History (Limit to last 10 messages to save tokens)
-        const historyResult = await query(
-            `SELECT sender, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT 10`,
-            [conversationId]
-        );
+    // 3. Fetch History (Limit 10)
+    const pastMessages = await prisma.message.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: 'asc' },
+      take: 10,
+    });
 
-        // Format history for Gemini Service
-        const history = historyResult.rows.map(row => ({
-            role: row.sender,
-            parts: row.content
-        }));
+    // Format for Gemini Service
+    const history = pastMessages.map((msg) => ({
+      role: msg.sender,
+      parts: msg.content,
+    }));
 
-        // 4. Generate AI Reply (Call Gemini)
-        const aiReply = await generateReply(history, message);
+    // 4. Generate AI Reply
+    const aiReply = await generateReply(history, message);
 
-        // 5. Save AI Reply to DB
-        await query(
-            `INSERT INTO messages (conversation_id, sender, content) VALUES ($1, 'ai', $2)`,
-            [conversationId, aiReply]
-        );
+    // 5. Save AI Reply
+    await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        sender: 'ai',
+        content: aiReply,
+      },
+    });
 
-        // 6. Respond to Frontend
-        res.json({ reply: aiReply, sessionId: activeSessionId });
-
-    } catch (error) {
-        console.error('Chat Handler Error:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
+    res.json({ reply: aiReply, sessionId: activeSessionId });
+  } catch (error) {
+    console.error('Chat Handler Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 };
 
-// Endpoint to load past messages when user refreshes the page
-export const getChatHistory = async (req: Request, res: Response) => {
-    const { sessionId } = req.params;
-    try {
-        const result = await query(
-            `SELECT m.sender, m.content, m.created_at 
-             FROM messages m 
-             JOIN conversations c ON m.conversation_id = c.id 
-             WHERE c.session_id = $1 
-             ORDER BY m.created_at ASC`,
-            [sessionId]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to fetch history' });
+export const getChatHistory = async (req: Request, res: Response): Promise<void> => {
+  // FIX: Explicitly cast req.params to tell TS "sessionId is a string"
+  const { sessionId } = req.params as { sessionId: string };
+
+  if (!sessionId) {
+    res.status(400).json({ error: 'Session ID is required' });
+    return;
+  }
+
+  try {
+    const conversation = await prisma.conversation.findUnique({
+      where: { sessionId }, // This is now safe
+      include: { 
+        messages: { 
+          orderBy: { createdAt: 'asc' },
+          select: { sender: true, content: true, createdAt: true } 
+        } 
+      },
+    });
+
+    if (!conversation) {
+      res.json([]);
+      return;
     }
+
+    // Now TypeScript knows 'messages' exists because the query above is valid
+    res.json(conversation.messages);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
 };

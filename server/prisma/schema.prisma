@@ -1,0 +1,28 @@
+// server/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id        String    @id @default(uuid()) // UUID primary key
+  sessionId String    @unique              // The guest session ID
+  createdAt DateTime  @default(now())
+  messages  Message[] // Relation: One conversation has many messages
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  content        String
+  sender         String       // "user" or "ai"
+  createdAt      DateTime     @default(now())
+  
+  // Relation to Conversation
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
